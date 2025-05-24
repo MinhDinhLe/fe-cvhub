@@ -14,15 +14,11 @@ import {
   Divider,
   Typography,
   Switch,
-  Statistic
+  Statistic,
+  Space,
+  Radio
 } from 'antd';
 import { 
-  DollarCircleOutlined,
-  EnvironmentOutlined,
-  CalendarOutlined,
-  BankOutlined,
-  UserOutlined,
-  BookOutlined,
   PushpinOutlined,
   FileAddOutlined
 } from '@ant-design/icons';
@@ -32,6 +28,7 @@ import { getAllProfessions } from '../../../../../api/professionApi';
 import { getEmployerByEmail } from "../../../../../api/employerApi";
 import JobSkillForm from './JobSkillForm';
 import dayjs from 'dayjs';
+import { createJobQuestion, createJobAnswer } from '../../../../../api/jobQuestionApi';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -49,9 +46,16 @@ const CreateJob = ({ visible, onClose, onSuccess }) => {
   const [createdJobId, setCreatedJobId] = useState(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [isPinned, setIsPinned] = useState(false);
+  const [isTestModalVisible, setIsTestModalVisible] = useState(false);
   const [jobLimits, setJobLimits] = useState({
     normalJobRemaining: 0,
     featuredJobRemaining: 0
+  });
+  const [testQuestions, setTestQuestions] = useState([]);
+  const [currentQuestion, setCurrentQuestion] = useState({
+    title: '',
+    options: [''],
+    correctAnswer: 0
   });
 
   useEffect(() => {
@@ -166,9 +170,32 @@ const CreateJob = ({ visible, onClose, onSuccess }) => {
         isFeatured: values.isPinned || false
       };
 
+      // Tạo job
       const response = await createJob(formattedValues);
-      message.success('Tạo tin tuyển dụng thành công');
-      setCreatedJobId(response.id);
+      const jobId = response.id;
+
+      // Nếu có câu hỏi, tạo các câu hỏi và câu trả lời
+      if (testQuestions.length > 0) {
+        for (const question of testQuestions) {
+          // Tạo câu hỏi
+          const questionResponse = await createJobQuestion({
+            jobCode: jobId,
+            questionText: question.title
+          });
+
+          // Tạo các câu trả lời cho câu hỏi
+          for (let i = 0; i < question.options.length; i++) {
+            await createJobAnswer({
+              questionId: questionResponse.id,
+              answerText: question.options[i],
+              isCorrect: i === question.correctAnswer
+            });
+          }
+        }
+      }
+
+      message.success('Tạo tin tuyển dụng và bài kiểm tra thành công');
+      setCreatedJobId(jobId);
       setCurrentStep(1);
       
       // Cập nhật lại job limits
@@ -198,6 +225,93 @@ const CreateJob = ({ visible, onClose, onSuccess }) => {
 
   const parseCurrency = (value) => {
     return value.replace(/\$\s?|(,*)/g, '').replace(' VNĐ', '');
+  };
+
+  // Thêm câu hỏi mới
+  const addQuestion = () => {
+    if (!currentQuestion.title.trim()) {
+      message.warning('Vui lòng nhập câu hỏi');
+      return;
+    }
+    if (currentQuestion.options.some(opt => !opt.trim())) {
+      message.warning('Vui lòng điền đầy đủ các lựa chọn');
+      return;
+    }
+
+    setTestQuestions([...testQuestions, { ...currentQuestion, id: Date.now() }]);
+    setCurrentQuestion({
+      title: '',
+      options: [''],
+      correctAnswer: 0
+    });
+  };
+
+  // Xóa câu hỏi
+  const deleteQuestion = (id) => {
+    setTestQuestions(testQuestions.filter(q => q.id !== id));
+  };
+
+  // Thêm lựa chọn mới
+  const addOption = () => {
+    setCurrentQuestion({
+      ...currentQuestion,
+      options: [...currentQuestion.options, '']
+    });
+  };
+
+  // Cập nhật lựa chọn
+  const updateOption = (index, value) => {
+    const newOptions = [...currentQuestion.options];
+    newOptions[index] = value;
+    setCurrentQuestion({
+      ...currentQuestion,
+      options: newOptions
+    });
+  };
+
+  // Xóa lựa chọn
+  const removeOption = (index) => {
+    if (currentQuestion.options.length <= 1) {
+      message.warning('Cần ít nhất một lựa chọn');
+      return;
+    }
+    const newOptions = currentQuestion.options.filter((_, i) => i !== index);
+    setCurrentQuestion({
+      ...currentQuestion,
+      options: newOptions,
+      correctAnswer: Math.min(currentQuestion.correctAnswer, newOptions.length - 1)
+    });
+  };
+
+  // Lưu bài kiểm tra
+  const handleTestSave = async () => {
+    if (testQuestions.length === 0) {
+      message.warning('Vui lòng thêm ít nhất một câu hỏi');
+      return;
+    }
+
+    try {
+      // Chuyển đổi dữ liệu theo format của backend
+      const formattedQuestions = testQuestions.map(question => ({
+        jobCode: createdJobId,
+        questionText: question.title,
+        answers: question.options.map((option, index) => ({
+          answerText: option,
+          isCorrect: index === question.correctAnswer
+        }))
+      }));
+
+      // Gọi API lưu bài kiểm tra
+      for (const question of formattedQuestions) {
+        await createJobQuestion(question);
+      }
+      
+      setIsTestModalVisible(false);
+      message.success('Đã lưu bài kiểm tra');
+    } catch (error) {
+      console.error('Error saving test:', error);
+      message.error('Lỗi khi lưu bài kiểm tra: ' + (error.response?.data?.message || error.message));
+    }
   };
 
   return (
@@ -260,7 +374,6 @@ const CreateJob = ({ visible, onClose, onSuccess }) => {
                   rules={[{ required: true, message: 'Vui lòng nhập tiêu đề' }]}
                 >
                   <Input 
-                    prefix={<BookOutlined />}
                     placeholder="VD: Tuyển Senior React Developer" 
                     size="large"
                   />
@@ -299,7 +412,6 @@ const CreateJob = ({ visible, onClose, onSuccess }) => {
                     showSearch
                     placeholder="Chọn tỉnh/thành phố"
                     size="large"
-                    prefix={<EnvironmentOutlined />}
                     optionFilterProp="children"
                   >
                     {provinces.map(province => (
@@ -326,7 +438,6 @@ const CreateJob = ({ visible, onClose, onSuccess }) => {
                   <InputNumber
                     style={{ width: '100%' }}
                     size="large"
-                    prefix={<DollarCircleOutlined />}
                     formatter={formatCurrency}
                     parser={parseCurrency}
                     min={0}
@@ -479,6 +590,26 @@ const CreateJob = ({ visible, onClose, onSuccess }) => {
             <Form.Item
               label={
                 <span>
+                  <FileAddOutlined /> Tạo bài kiểm tra
+                </span>
+              }
+              tooltip="Tạo bài kiểm tra cho ứng viên khi ứng tuyển"
+            >
+              <Button 
+                type="primary" 
+                onClick={() => setIsTestModalVisible(true)}
+                style={{ 
+                  background: "linear-gradient(to right, #008000)",
+                  border: "none"
+                }}
+              >
+                Tạo bài kiểm tra
+              </Button>
+            </Form.Item>
+
+            <Form.Item
+              label={
+                <span>
                   <PushpinOutlined /> Ghim tin tuyển dụng
                 </span>
               }
@@ -508,6 +639,127 @@ const CreateJob = ({ visible, onClose, onSuccess }) => {
       ) : (
         <JobSkillForm jobId={createdJobId} onSuccess={handleSkillsSuccess} />
       )}
+
+      {/* Modal tạo bài kiểm tra */}
+      <Modal
+        title={
+          <Title level={3} style={{ margin: 0, color: '#008000' }}>
+            Tạo bài kiểm tra
+          </Title>
+        }
+        open={isTestModalVisible}
+        onCancel={() => setIsTestModalVisible(false)}
+        footer={null}
+        width={1000}
+        style={{ top: 20 }}
+      >
+        <div className="p-4">
+          <Title level={4} className="mb-4">Tạo bài kiểm tra</Title>
+          
+          {/* Form thêm câu hỏi mới */}
+          <Card className="mb-4">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Câu hỏi</label>
+                <TextArea
+                  value={currentQuestion.title}
+                  onChange={(e) => setCurrentQuestion({ ...currentQuestion, title: e.target.value })}
+                  placeholder="Nhập câu hỏi"
+                  rows={3}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Các lựa chọn</label>
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  {currentQuestion.options.map((option, index) => (
+                    <div key={index} className="flex items-center space-x-2">
+                      <Radio
+                        checked={currentQuestion.correctAnswer === index}
+                        onChange={() => setCurrentQuestion({ ...currentQuestion, correctAnswer: index })}
+                      />
+                      <Input
+                        value={option}
+                        onChange={(e) => updateOption(index, e.target.value)}
+                        placeholder={`Lựa chọn ${index + 1}`}
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        type="text"
+                        danger
+                        onClick={() => removeOption(index)}
+                      />
+                    </div>
+                  ))}
+                </Space>
+                <Button
+                  type="dashed"
+                  onClick={addOption}
+                  className="mt-2"
+                >
+                  Thêm lựa chọn
+                </Button>
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  type="primary"
+                  onClick={addQuestion}
+                  style={{ 
+                    background: "linear-gradient(to right, #008000)",
+                    border: "none"
+                  }}
+                >
+                  Thêm câu hỏi
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          {/* Danh sách câu hỏi đã thêm */}
+          {testQuestions.map((question, index) => (
+            <Card key={question.id} className="mb-4">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <h3 className="text-lg font-medium mb-2">
+                    {index + 1}. {question.title}
+                  </h3>
+                  <Radio.Group value={question.correctAnswer} disabled>
+                    <Space direction="vertical">
+                      {question.options.map((option, i) => (
+                        <Radio key={i} value={i}>
+                          {option}
+                        </Radio>
+                      ))}
+                    </Space>
+                  </Radio.Group>
+                </div>
+                <Button
+                  type="text"
+                  danger
+                  onClick={() => deleteQuestion(question.id)}
+                />
+              </div>
+            </Card>
+          ))}
+
+          {/* Nút lưu bài kiểm tra */}
+          {testQuestions.length > 0 && (
+            <div className="flex justify-end mt-4">
+              <Button
+                type="primary"
+                onClick={handleTestSave}
+                style={{ 
+                  background: "linear-gradient(to right, #008000)",
+                  border: "none"
+                }}
+              >
+                Lưu bài kiểm tra
+              </Button>
+            </div>
+          )}
+        </div>
+      </Modal>
     </Modal>
   );
 };

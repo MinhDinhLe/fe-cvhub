@@ -4,10 +4,11 @@ import PropTypes from "prop-types";
 import { useNavigate } from "react-router-dom";
 import { EnvironmentOutlined, DollarOutlined, CalendarOutlined, HeartOutlined, UserOutlined, FileTextOutlined, MailOutlined, PhoneOutlined, FieldTimeOutlined, BookOutlined, ClockCircleOutlined, ToolOutlined } from "@ant-design/icons";
 import { getJobById, getAllJobs } from "../../../api/jobApi";
-import { Menu, Modal, Button, Spin, message, Progress, Tag } from "antd";
+import { Menu, Modal, Button, Spin, message, Progress, Tag, Radio, Space } from "antd";
 import { AuthContext } from '../../auth/AuthProvider';
 import { getCandidateProfileByEmail, getSavedJobs, unsaveJob, saveJob } from '../../../api/candidateApi';
 import { createApplication, getApplicationsByCandidateId } from '../../../api/applicationApi';
+import { getJobQuestions } from '../../../api/jobQuestionApi';
 
 const JobDetailCombined = ({ jobId }) => {
   const navigate = useNavigate();
@@ -22,6 +23,11 @@ const JobDetailCombined = ({ jobId }) => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [candidateProfile, setCandidateProfile] = useState(null);
   const [hasApplied, setHasApplied] = useState(false);
+  const [isTestModalVisible, setIsTestModalVisible] = useState(false);
+  const [testQuestions, setTestQuestions] = useState([]);
+  const [userAnswers, setUserAnswers] = useState({});
+  const [testScore, setTestScore] = useState(0);
+  const [isTestCompleted, setIsTestCompleted] = useState(false);
 
   useEffect(() => {
     setTimeout(() => {
@@ -147,7 +153,7 @@ const JobDetailCombined = ({ jobId }) => {
     checkSavedStatus();
   }, [candidateProfile, jobId]);
 
-  const handleApplyNow = () => {
+  const handleApplyNow = async () => {
     if (!isAuthenticated || !user) {
       message.warning('Vui lòng đăng nhập để ứng tuyển');
       navigate('/login');
@@ -158,7 +164,53 @@ const JobDetailCombined = ({ jobId }) => {
       message.warning('Bạn đã nộp đơn cho công việc này.');
       return;
     }
-    setIsModalVisible(true);
+
+    try {
+      // Lấy danh sách câu hỏi
+      const questions = await getJobQuestions(jobId);
+      if (questions && questions.length > 0) {
+        setTestQuestions(questions);
+        setIsTestModalVisible(true);
+      } else {
+        // Nếu không có câu hỏi, hiển thị modal ứng tuyển bình thường
+        setIsModalVisible(true);
+      }
+    } catch (error) {
+      console.error('Error fetching questions:', error);
+      message.error('Có lỗi xảy ra khi tải bài kiểm tra');
+    }
+  };
+
+  const handleTestSubmit = () => {
+    let correctAnswers = 0;
+    let totalQuestions = testQuestions.length;
+
+    testQuestions.forEach(question => {
+      const userAnswer = userAnswers[question.id];
+      const correctAnswer = question.answers.find(answer => answer.isCorrect);
+      if (userAnswer === correctAnswer?.id) {
+        correctAnswers++;
+      }
+    });
+
+    const score = (correctAnswers / totalQuestions) * 100;
+    setTestScore(score);
+    setIsTestCompleted(true);
+
+    if (score >= 80) {
+      message.success('Chúc mừng! Bạn đã vượt qua bài kiểm tra.');
+      setIsTestModalVisible(false);
+      setIsModalVisible(true);
+    } else {
+      message.error('Bạn cần đạt ít nhất 80% để tiếp tục ứng tuyển.');
+    }
+  };
+
+  const handleAnswerChange = (questionId, answerId) => {
+    setUserAnswers(prev => ({
+      ...prev,
+      [questionId]: answerId
+    }));
   };
 
   const handleModalClose = () => {
@@ -256,11 +308,13 @@ const JobDetailCombined = ({ jobId }) => {
         candidateSkills.includes(skill)
       );
 
-      const skillScore = (matchingSkills.length / requiredSkills.length) * 40;
+      // const skillScore = (matchingSkills.length / requiredSkills.length) * 40;
+      const skillScore = 40;
       totalScore += skillScore;
     }
 
-    return Math.floor(totalScore);
+    return Math.floor(100);
+    // return Math.floor(totalScore);
   };
 
   const [completionPercentage, setCompletionPercentage] = useState(0);
@@ -978,6 +1032,92 @@ const JobDetailCombined = ({ jobId }) => {
             )}
           </div>
         </div>
+      </Modal>
+      <Modal
+        title="Bài kiểm tra ứng tuyển"
+        visible={isTestModalVisible}
+        onCancel={() => setIsTestModalVisible(false)}
+        footer={null}
+        width={800}
+      >
+        {!isTestCompleted ? (
+          <div>
+            <div className="mb-4">
+              <h4>Hướng dẫn:</h4>
+              <ul>
+                <li>Bài kiểm tra gồm {testQuestions.length} câu hỏi</li>
+                <li>Bạn cần đạt ít nhất 80% để tiếp tục ứng tuyển</li>
+                <li>Hãy chọn câu trả lời đúng nhất cho mỗi câu hỏi</li>
+              </ul>
+            </div>
+
+            {testQuestions.map((question, index) => (
+              <div key={question.id} className="mb-6 p-4 border rounded">
+                <h5 className="mb-3">
+                  Câu {index + 1}: {question.questionText}
+                </h5>
+                <Radio.Group
+                  onChange={(e) => handleAnswerChange(question.id, e.target.value)}
+                  value={userAnswers[question.id]}
+                >
+                  <Space direction="vertical">
+                    {question.answers.map(answer => (
+                      <Radio key={answer.id} value={answer.id}>
+                        {answer.answerText}
+                      </Radio>
+                    ))}
+                  </Space>
+                </Radio.Group>
+              </div>
+            ))}
+
+            <div className="text-center mt-4">
+              <Button
+                type="primary"
+                onClick={handleTestSubmit}
+                size="large"
+                style={{
+                  background: "linear-gradient(to right, #008000)",
+                  border: "none",
+                  minWidth: "200px"
+                }}
+              >
+                Nộp bài
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center">
+            <h3>Kết quả bài kiểm tra</h3>
+            <Progress
+              type="circle"
+              percent={testScore}
+              format={percent => `${percent}%`}
+              status={testScore >= 80 ? "success" : "exception"}
+              style={{ margin: '20px 0' }}
+            />
+            <p>
+              {testScore >= 80
+                ? "Chúc mừng! Bạn đã vượt qua bài kiểm tra."
+                : "Bạn cần đạt ít nhất 80% để tiếp tục ứng tuyển."}
+            </p>
+            {testScore < 80 && (
+              <Button
+                type="primary"
+                onClick={() => {
+                  setIsTestCompleted(false);
+                  setUserAnswers({});
+                }}
+                style={{
+                  background: "linear-gradient(to right, #008000)",
+                  border: "none"
+                }}
+              >
+                Thử lại
+              </Button>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

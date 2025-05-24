@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import { AuthContext } from '../../../components/auth/AuthProvider';
-import ChatRoom from '../../common/ChatRoom/ChatRoom';
+import ChatRoom from '../../common/ChatRoom/ChatRoom.jsx';
 import logo from '../../../assets/logos/logo.png';
 import WebSocketService from '../../../services/websocket';
 import { API_URL } from '../../../utils/config';
